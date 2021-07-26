@@ -3,7 +3,7 @@
 # Created by aaron@schiff.nz
 # https://github.com/aaronschiff/honest-economic-forecasts 
 
-# Updated to: 2021 Q1
+# Data updated to: 2021 Q1
 
 
 # *****************************************************************************
@@ -13,7 +13,7 @@
 series <- "gdp"
 latest_data <- "2021Q1"
 forecast_periods <- 8
-forecast_uncertainty_reps <- 10000
+forecast_uncertainty_reps <- 5000
 
 # Libraries
 library(conflicted)
@@ -28,21 +28,11 @@ library(distributional)
 library(lubridate)
 library(tsibble)
 library(as.charts)   # Custom library for formatting charts nicely
+source(here("src/utility.R"))
 
 # Conflicts
 conflict_prefer(name = "filter", winner = "dplyr")
 conflict_prefer(name = "lag", winner = "dplyr")
-
-# *****************************************************************************
-
-
-# *****************************************************************************
-# Utility functions ---- 
-
-# Quantiles in a tibble
-quibble <- function(x, q) {
-  tibble(x = quantile(x, q), q = q)
-}
 
 # *****************************************************************************
 
