@@ -145,7 +145,8 @@ forecast_uncertainty_intervals <- full_join(
 vis_actuals <- dat |> 
   as_tibble() |>
   slice_max(order_by = date, n = 2 * forecast_periods) |> 
-  arrange(date)
+  arrange(date) |> 
+  mutate(vjust = label_vjust(growth_rate))
 
 # Create data for for visualisation - prepend last actual value of
 # growth rate
@@ -165,11 +166,14 @@ vis_forecast_mean <- bind_rows(
   forecast_mean, 
   last_actual_growth_rate |> rename(.mean_growth_rate = growth_rate)
 ) |> 
-  arrange(date)
+  arrange(date) |> 
+  mutate(vjust = label_vjust(.mean_growth_rate))
 
 vis_intervals <- bind_rows(
-  forecast_uncertainty_intervals, 
-  last_actual_growth_rate
+  forecast_uncertainty_intervals |> 
+    mutate(type = "forecast"), 
+  last_actual_growth_rate |> 
+    mutate(type = "actual")
 ) |> 
   mutate(conf_lower = ifelse(is.na(conf_lower), growth_rate, conf_lower), 
          conf_upper = ifelse(is.na(conf_upper), growth_rate, conf_upper)) |> 
@@ -187,13 +191,20 @@ chart_forecasts <- ggplot() +
                           y = .sim_growth_rate, 
                           group = .rep), 
             size = 0.1, 
-            alpha = 0.25) + 
+            alpha = 0.1) + 
   
   # Actuals
   geom_line(data = vis_actuals, 
             mapping = aes(x = date, 
                           y = growth_rate), 
             colour = "red") + 
+  geom_text_custom(data = vis_actuals, 
+                   mapping = aes(x = date, 
+                                 y = growth_rate, 
+                                 label = comma(x = 100 * growth_rate, 
+                                               accuracy = 0.1), 
+                                 vjust = vjust), 
+                   colour = "red") + 
   
   # 95% uncertainty interval
   geom_line(data = vis_intervals, 
@@ -202,12 +213,38 @@ chart_forecasts <- ggplot() +
                           group = limit), 
             colour = "blue", 
             linetype = "dashed") + 
+  geom_text_custom(data = vis_intervals |> 
+                     filter(type == "forecast", limit == "conf_upper"), 
+                   mapping = aes(x = date, 
+                                 y = value, 
+                                 label = comma(x = 100 * value, 
+                                               accuracy = 0.1), 
+                                 vjust = vjust_up), 
+                   colour = "blue") + 
+  geom_text_custom(data = vis_intervals |> 
+                     filter(type == "forecast", limit == "conf_lower"), 
+                   mapping = aes(x = date, 
+                                 y = value, 
+                                 label = comma(x = 100 * value, 
+                                               accuracy = 0.1), 
+                                 vjust = vjust_down), 
+                   colour = "blue") + 
   
   # Mean forecast
   geom_line(data = vis_forecast_mean, 
             mapping = aes(x = date, 
                           y = .mean_growth_rate), 
-            colour = "blue")
+            colour = "blue") + 
+  geom_text_custom(data = vis_forecast_mean |> filter(!is.na(.mean)), 
+                   mapping = aes(x = date, 
+                                 y = .mean_growth_rate, 
+                                 label = comma(x = 100 * .mean_growth_rate, 
+                                               accuracy = 0.1), 
+                                 vjust = vjust), 
+                   colour = "blue") + 
+  
+  # Scales
+  scale_y_continuous(labels = percent_format(accuracy = 1))
 
 
 
