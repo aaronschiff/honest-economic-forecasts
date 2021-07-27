@@ -46,7 +46,8 @@ dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")),
   clean_names() |> 
   filter(level == "Total GDP") |>
   mutate(date = yearquarter(quarter)) |>
-  mutate(growth_rate = amount / lag(amount) - 1) |> 
+  rename(gdp = amount) |> 
+  mutate(growth_rate = gdp / lag(gdp) - 1) |> 
   as_tsibble(index = date, regular = TRUE)
 
 # *****************************************************************************
@@ -54,59 +55,85 @@ dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")),
 
 # *****************************************************************************
 # Forecast ----
-# Values for 2020Q2 and Q3 are replaced with modelled (interpolated) values to
+# Values for 2020Q2 is replaced with modelled (interpolated) value to
 # prevent covid lockdown shock from affecting forecasts too much. 
 
-# Data for 2020Q2 and Q3 interpolation
+# Data for 2020Q2 interpolation
 dat_interp_base <- dat |> 
-  mutate(growth_rate_to_interp = ifelse(quarter %in% c("2020Q2", "2020Q3"), 
-                                        NA_real_, 
-                                        growth_rate))
+  mutate(gdp_to_interp = ifelse(quarter %in% c("2020Q2"), NA_real_, gdp))
 
-# Interpolated values
-interpolated_2020q2q3 <- dat_interp_base |> 
-  model(arima = ARIMA(formula = growth_rate_to_interp, ic = "bic")) |> 
+# Interpolated value
+interpolated_2020q2 <- dat_interp_base |> 
+  model(arima = ARIMA(formula = gdp_to_interp, ic = "bic")) |> 
   interpolate(dat_interp_base) |> 
-  filter(date %in% yearquarter(c("2020Q2", "2020Q3"))) 
+  filter(date == yearquarter("2020Q2")) |> 
+  pull(gdp_to_interp)
 
-# Original data combined with interpolated values
-# growth_rate and growth_rate_to_model are the same except for in 2020Q2 and Q3
-dat_model <- dat_interp_base |> 
-  left_join(y = interpolated_2020q2q3, 
-            by = "date") |>
-  mutate(growth_rate_to_model = ifelse(quarter %in% c("2020Q2", "2020Q3"), 
-                                       growth_rate_to_interp.y, 
-                                       growth_rate)) |> 
-  select(-growth_rate_to_interp.x, -growth_rate_to_interp.y)
+# Original data combined with interpolated value for 2020Q2
+# gdp and gdp_to_model are the same except for in 2020Q2
+dat_model <- dat |> 
+  mutate(gdp_to_model = ifelse(quarter == "2020Q2", interpolated_2020q2, gdp))
 
 # Forecasting model  
+model_lambda <- dat_model |>
+  features(.var = gdp_to_model, features = guerrero) |>
+  pull(lambda_guerrero) 
+
 model <- dat_model |> 
   model(
-    arima = ARIMA(formula = growth_rate_to_model, ic = "bic")
+    arima = ARIMA(formula = box_cox(x = gdp_to_model,
+                                    lambda = model_lambda), 
+                  ic = "bic")
   )
 
-# Mean forecast
+# Last actual value (for calculating forecast growth rates)
+last_actual <- dat |> 
+  slice_max(order_by = date, n = 1) |> 
+  select(date, gdp) |> 
+  as_tibble()
+
+# Mean forecast level and growth rate
 forecast_mean <- model |> 
   forecast(h = forecast_periods) |> 
   as_tibble() |> 
-  select(date, .mean)
+  select(date, .mean) |>
+  bind_rows(last_actual |> rename(.mean = gdp)) |> 
+  arrange(date) |> 
+  mutate(.mean_growth_rate = .mean / lag(.mean) - 1) |> 
+  filter(!is.na(.mean_growth_rate))
 
-# Uncertainty simulations (bootstrapped)
+# Uncertainty simulations for levels and growth rates
 forecast_uncertainty_sims <- model |> 
   generate(h = forecast_periods, 
            times = forecast_uncertainty_reps, 
            bootstrap = FALSE) |> 
   as_tibble() |> 
-  select(-.model)
+  select(-.model) |> 
+  bind_rows(
+    tibble(.rep = as.character(1:forecast_uncertainty_reps), 
+           last_actual |> rename(.sim = gdp))
+  ) |> 
+  arrange(.rep, date) |> 
+  group_by(.rep) |> 
+  mutate(.sim_growth_rate = .sim / lag(.sim) - 1) |> 
+  ungroup() |> 
+  filter(!is.na(.sim_growth_rate))
 
-# Forecast uncertainty intervals as percentiles of simulated values
-forecast_uncertainty_intervals <- forecast_uncertainty_sims |> 
-  group_by(date) |>
-  summarise(conf_lower = quibble(x = .sim, 
-                                 q = c(0.025, 0.1, 0.175)), 
-            conf_upper = quibble(x = .sim, 
-                                 q = c(0.975, 0.9, 0.825))) |>
-  ungroup()
+# Forecast uncertainty intervals of growth rates as percentiles of 
+# simulated growth rates
+forecast_uncertainty_intervals <- full_join(
+  # 95% interval lower limit
+  x = forecast_uncertainty_sims |> 
+    group_by(date) |>
+    summarise(conf_lower = quantile(x = .sim_growth_rate, probs = 0.025)), 
+  
+  # 95% interval upper limit
+  y = forecast_uncertainty_sims |> 
+    group_by(date) |>
+    summarise(conf_upper = quantile(x = .sim_growth_rate, probs = 0.975)), 
+  
+  by = "date"
+)
 
 # *****************************************************************************
 
@@ -114,27 +141,73 @@ forecast_uncertainty_intervals <- forecast_uncertainty_sims |>
 # *****************************************************************************
 # Visualise ----
 
-# Uncertainty simulations for visualisation - prepend last actual value
-last_actual <- dat_model |> 
+# Actuals to show on the chart: twice as many points as in the forecast
+vis_actuals <- dat |> 
+  as_tibble() |>
+  slice_max(order_by = date, n = 2 * forecast_periods) |> 
+  arrange(date)
+
+# Create data for for visualisation - prepend last actual value of
+# growth rate
+last_actual_growth_rate <- dat |> 
   as_tibble() |> 
   slice_max(order_by = date, n = 1) |> 
-  select(date, .sim = growth_rate)
+  select(date, growth_rate)
 
 vis_uncertainty <- bind_rows(
   forecast_uncertainty_sims, 
   tibble(.rep = as.character(1:forecast_uncertainty_reps), 
-         last_actual)
+         last_actual_growth_rate |> rename(.sim_growth_rate = growth_rate))
 ) |> 
   arrange(.rep, date)
 
+vis_forecast_mean <- bind_rows(
+  forecast_mean, 
+  last_actual_growth_rate |> rename(.mean_growth_rate = growth_rate)
+) |> 
+  arrange(date)
+
+vis_intervals <- bind_rows(
+  forecast_uncertainty_intervals, 
+  last_actual_growth_rate
+) |> 
+  mutate(conf_lower = ifelse(is.na(conf_lower), growth_rate, conf_lower), 
+         conf_upper = ifelse(is.na(conf_upper), growth_rate, conf_upper)) |> 
+  select(-growth_rate) |> 
+  arrange(date) |> 
+  pivot_longer(cols = c("conf_lower", "conf_upper"), 
+               names_to = "limit", 
+               values_to = "value")
+
+# Create visualisation
 chart_forecasts <- ggplot() +
   # Uncertainty simulations
   geom_line(data = vis_uncertainty, 
             mapping = aes(x = date, 
-                          y = .sim, 
+                          y = .sim_growth_rate, 
                           group = .rep), 
             size = 0.1, 
-            alpha = 0.25)
+            alpha = 0.25) + 
+  
+  # Actuals
+  geom_line(data = vis_actuals, 
+            mapping = aes(x = date, 
+                          y = growth_rate), 
+            colour = "red") + 
+  
+  # 95% uncertainty interval
+  geom_line(data = vis_intervals, 
+            mapping = aes(x = date, 
+                          y = value, 
+                          group = limit), 
+            colour = "blue", 
+            linetype = "dashed") + 
+  
+  # Mean forecast
+  geom_line(data = vis_forecast_mean, 
+            mapping = aes(x = date, 
+                          y = .mean_growth_rate), 
+            colour = "blue")
 
 
 
