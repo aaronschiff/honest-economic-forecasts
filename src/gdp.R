@@ -5,9 +5,6 @@
 
 # Data updated to: 2021 Q1
 
-# TODO: Tidy up chart formatting
-# TODO: Save forecasts (mean & intervals) to file
-
 # *****************************************************************************
 # Setup ----
 
@@ -291,5 +288,24 @@ output_chart(chart = chart_forecasts,
              orientation = "wide", 
              xlab = "", 
              ylab = "")
+
+# *****************************************************************************
+
+
+# *****************************************************************************
+# Save forecast ----
+
+# Forecast mean
+write_csv(x = forecast_mean, 
+          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_mean.csv")))
+
+# Forecast uncertainty simulations
+write_csv(x = forecast_uncertainty_sims, 
+          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_sims.csv")))
+
+# Forecast uncertainty interval
+write_csv(x = forecast_uncertainty_intervals, 
+          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_intervals.csv")))
+
 
 # *****************************************************************************
