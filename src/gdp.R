@@ -5,6 +5,8 @@
 
 # Data updated to: 2021 Q1
 
+# TODO: Tidy up chart formatting
+# TODO: Save forecasts (mean & intervals) to file
 
 # *****************************************************************************
 # Setup ----
@@ -29,6 +31,7 @@ library(lubridate)
 library(tsibble)
 library(as.charts)   # Custom library for formatting charts nicely
 source(here("src/utility.R"))
+source(here("src/constants.R"))
 
 # Conflicts
 conflict_prefer(name = "filter", winner = "dplyr")
@@ -245,7 +248,5 @@ chart_forecasts <- ggplot() +
   
   # Scales
   scale_y_continuous(labels = percent_format(accuracy = 1))
-
-
 
 # *****************************************************************************
