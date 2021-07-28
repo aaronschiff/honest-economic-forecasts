@@ -188,34 +188,59 @@ vis_intervals <- bind_rows(
 
 # Create visualisation
 chart_forecasts <- ggplot() +
+  # Zero line
+  geom_hline(yintercept = 0, 
+             size = linesize_zeroline, 
+             colour = colour_zeroline) + 
+  
   # Uncertainty simulations
   geom_line(data = vis_uncertainty, 
             mapping = aes(x = date, 
                           y = .sim_growth_rate, 
                           group = .rep), 
-            size = 0.1, 
-            alpha = 0.1) + 
+            size = linesize_uncertainty, 
+            alpha = alpha_uncertainty) + 
   
-  # Actuals
+  # Mean forecast points
+  geom_point(data = vis_forecast_mean, 
+             mapping = aes(x = date, 
+                           y = .mean_growth_rate), 
+             colour = colour_forecast_mean, 
+             size = point_size) + 
+  
+  # Uncertainty interval points
+  geom_point(data = vis_intervals, 
+             mapping = aes(x = date, 
+                           y = value), 
+             colour = colour_forecast_intervals, 
+             size = point_size) + 
+  
+  # Actuals line
   geom_line(data = vis_actuals, 
             mapping = aes(x = date, 
                           y = growth_rate), 
-            colour = "red") + 
+            colour = colour_actuals, 
+            size = linesize_actuals) + 
+  
+  # Actuals labels
   geom_text_custom(data = vis_actuals, 
                    mapping = aes(x = date, 
                                  y = growth_rate, 
                                  label = comma(x = 100 * growth_rate, 
                                                accuracy = 0.1), 
                                  vjust = vjust), 
-                   colour = "red") + 
+                   colour = colour_actuals) + 
   
-  # 95% uncertainty interval
+  # 95% uncertainty interval lines
   geom_line(data = vis_intervals, 
             mapping = aes(x = date, 
                           y = value, 
                           group = limit), 
-            colour = "blue", 
-            linetype = "dashed") + 
+            colour = colour_forecast_intervals, 
+            size = linesize_forecast_intervals, 
+            linetype = linetype_forecast_intervals) + 
+  
+  # 95% uncertainty interval labels
   geom_text_custom(data = vis_intervals |> 
                      filter(type == "forecast", limit == "conf_upper"), 
                    mapping = aes(x = date, 
@@ -223,7 +248,7 @@ chart_forecasts <- ggplot() +
                                  label = comma(x = 100 * value, 
                                                accuracy = 0.1), 
                                  vjust = vjust_up), 
-                   colour = "blue") + 
+                   colour = colour_forecast_intervals) + 
   geom_text_custom(data = vis_intervals |> 
                      filter(type == "forecast", limit == "conf_lower"), 
                    mapping = aes(x = date, 
@@ -231,22 +256,40 @@ chart_forecasts <- ggplot() +
                                  label = comma(x = 100 * value, 
                                                accuracy = 0.1), 
                                  vjust = vjust_down), 
-                   colour = "blue") + 
+                   colour = colour_forecast_intervals) + 
   
-  # Mean forecast
+  # Mean forecast line
   geom_line(data = vis_forecast_mean, 
             mapping = aes(x = date, 
                           y = .mean_growth_rate), 
-            colour = "blue") + 
+            colour = colour_forecast_mean, 
+            size = linesize_forecast_mean) + 
+  
+  # Mean forecast labels
   geom_text_custom(data = vis_forecast_mean |> filter(!is.na(.mean)), 
                    mapping = aes(x = date, 
                                  y = .mean_growth_rate, 
                                  label = comma(x = 100 * .mean_growth_rate, 
                                                accuracy = 0.1), 
                                  vjust = vjust), 
-                   colour = "blue") + 
+                   colour = colour_forecast_mean) + 
+  
+  # Actual points
+  geom_point(data = vis_actuals, 
+             mapping = aes(x = date, 
+                           y = growth_rate), 
+             colour = colour_actuals, 
+             size = point_size) + 
   
   # Scales
-  scale_y_continuous(labels = percent_format(accuracy = 1))
+  scale_y_continuous(labels = percent_format(accuracy = 1)) + 
+  scale_x_yearquarter(date_breaks = "1 year")
+
+output_chart(chart = chart_forecasts, 
+             filename = series, 
+             path = here(glue("forecasts/{series}/{latest_data}")), 
+             orientation = "wide", 
+             xlab = "", 
+             ylab = "")
 
 # *****************************************************************************

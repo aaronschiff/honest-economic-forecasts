@@ -1,6 +1,22 @@
 # Constants that apply to all forecasts
 
 # Annotation adjustment on charts
-vjust_up <- -0.3
-vjust_down <- 1.3
+vjust_up <- -0.5
+vjust_down <- 1.5
 
+# Chart colours 
+colour_actuals <- "black"
+colour_forecast_mean <- "red"
+colour_forecast_intervals <- "red"
+colour_uncertainty <- grey(0.5)
+alpha_uncertainty <- 0.05
+colour_zeroline <- grey(0.5)
+
+# Chart line sizes etc
+linetype_forecast_intervals <- "dashed"
+linesize_forecast_intervals <- 0.25
+linesize_uncertainty <- 0.04
+linesize_forecast_mean <- 0.25
+linesize_actuals <- 0.25
+linesize_zeroline <- 0.15
+point_size <- 0.4
