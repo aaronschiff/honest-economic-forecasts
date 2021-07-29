@@ -64,9 +64,14 @@ dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")),
 dat_model <- dat
 
 # Forecasting model
+model_lambda <- dat_model |>
+  features(.var = unemp, features = guerrero) |>
+  pull(lambda_guerrero) 
+
 model <- dat_model |> 
   model(
-    arima = ARIMA(formula = unemp, 
+    arima = ARIMA(formula = box_cox(x = unemp, 
+                                    lambda = model_lambda),
                   ic = "bic")
   )
 
