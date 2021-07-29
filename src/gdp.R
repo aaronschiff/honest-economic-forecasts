@@ -122,18 +122,32 @@ forecast_uncertainty_sims <- model |>
 # Forecast uncertainty intervals of growth rates as percentiles of 
 # simulated growth rates
 forecast_uncertainty_intervals <- full_join(
-  # 95% interval lower limit
+  # 90% interval lower limit
   x = forecast_uncertainty_sims |> 
     group_by(date) |>
     summarise(conf_lower = quantile(x = .sim_growth_rate, probs = 0.025)), 
   
-  # 95% interval upper limit
+  # 90% interval upper limit
   y = forecast_uncertainty_sims |> 
     group_by(date) |>
     summarise(conf_upper = quantile(x = .sim_growth_rate, probs = 0.975)), 
   
   by = "date"
-)
+) |>
+  # 50% interval lower limit
+  full_join(
+    y = forecast_uncertainty_sims |> 
+      group_by(date) |>
+      summarise(central_lower = quantile(x = .sim_growth_rate, probs = 0.25)), 
+    by = "date"
+  ) |> 
+  # 50% interval upper limit
+  full_join(
+    y = forecast_uncertainty_sims |> 
+      group_by(date) |>
+      summarise(central_upper = quantile(x = .sim_growth_rate, probs = 0.75)), 
+    by = "date"
+  )
 
 # *****************************************************************************
 
@@ -176,10 +190,12 @@ vis_intervals <- bind_rows(
     mutate(type = "actual")
 ) |> 
   mutate(conf_lower = ifelse(is.na(conf_lower), growth_rate, conf_lower), 
-         conf_upper = ifelse(is.na(conf_upper), growth_rate, conf_upper)) |> 
+         conf_upper = ifelse(is.na(conf_upper), growth_rate, conf_upper), 
+         central_lower = ifelse(is.na(central_lower), growth_rate, central_lower), 
+         central_upper = ifelse(is.na(central_upper), growth_rate, central_upper)) |> 
   select(-growth_rate) |> 
   arrange(date) |> 
-  pivot_longer(cols = c("conf_lower", "conf_upper"), 
+  pivot_longer(cols = c("conf_lower", "conf_upper", "central_lower", "central_upper"), 
                names_to = "limit", 
                values_to = "value")
 
@@ -206,7 +222,8 @@ chart_forecasts <- ggplot() +
              size = point_size) + 
   
   # Uncertainty interval points
-  geom_point(data = vis_intervals, 
+  geom_point(data = vis_intervals |> 
+               filter(limit %in% c("conf_lower", "conf_upper")), 
              mapping = aes(x = date, 
                            y = value), 
              colour = colour_forecast_intervals, 
@@ -228,8 +245,9 @@ chart_forecasts <- ggplot() +
                                  vjust = vjust), 
                    colour = colour_actuals) + 
   
-  # 95% uncertainty interval lines
-  geom_line(data = vis_intervals, 
+  # 90% uncertainty interval lines
+  geom_line(data = vis_intervals |> 
+              filter(limit %in% c("conf_lower", "conf_upper")), 
             mapping = aes(x = date, 
                           y = value, 
                           group = limit), 
@@ -237,7 +255,17 @@ chart_forecasts <- ggplot() +
             size = linesize_forecast_intervals, 
             linetype = linetype_forecast_intervals) + 
   
-  # 95% uncertainty interval labels
+  # Central (50%) uncertainty lines
+  geom_line(data = vis_intervals |> 
+              filter(limit %in% c("central_lower", "central_upper")), 
+            mapping = aes(x = date, 
+                          y = value, 
+                          group = limit), 
+            colour = colour_forecast_central, 
+            size = linesize_forecast_central, 
+            linetype = linetype_forecast_central) + 
+  
+  # 90% uncertainty interval labels
   geom_text_custom(data = vis_intervals |> 
                      filter(type == "forecast", limit == "conf_upper"), 
                    mapping = aes(x = date, 
