@@ -1,16 +1,17 @@
-# Forecasts of New Zealand's seasonally-adjusted unemployment rate
+# Forecast of New Zealand first home mortgage floating rate
+
 
 # Created by aaron@schiff.nz
 # https://github.com/aaronschiff/honest-economic-forecasts 
 
-# Data updated to: 2021 Q1
+# Data updated to: 2021 Q2
 
 # *****************************************************************************
 # Setup ----
 
 # Forecast configuration
-series <- "unemployment"
-latest_data <- "2021Q1"
+series <- "interest-rate"
+latest_data <- "2021Q2"
 forecast_periods <- 8
 forecast_uncertainty_reps <- 5000
 forecast_label_y <- 0.075
@@ -27,6 +28,7 @@ library(feasts)
 library(distributional)
 library(lubridate)
 library(tsibble)
+library(readxl)
 library(as.charts)   # Custom library for formatting charts nicely
 source(here("src/utility.R"))
 source(here("src/constants.R"))
@@ -42,16 +44,19 @@ conflict_prefer(name = "lag", winner = "dplyr")
 # Load data ----
 
 # Read source data and select those for forecasting
-dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")), 
-                col_types = "ccncciccccccc") |>
+dat <- read_excel(path = here(glue("data/{series}/{latest_data}/{series}.xlsx")), 
+                  sheet = "Data", 
+                  col_types = c("date", rep("numeric", 9))) |>
   clean_names() |> 
-  separate(col = period, into = c("year", "quarter"), sep = "\\.", 
-           convert = TRUE) |>
-  mutate(quarter = as.integer(quarter / 3)) |> 
-  mutate(date = yearquarter(glue("{year}Q{quarter}"))) |>
-  filter(year > 1989) |> 
-  select(date, year, quarter, unemp = data_value) |> 
-  mutate(unemp = unemp / 100) |> 
+  filter(!is.na(housing_lending)) |>
+  rename(date = x1) |> 
+  select(date, housing_lending) |> 
+  filter(year(date) > 1989) |> 
+  mutate(year = year(date), quarter = quarter(date)) |> 
+  group_by(year, quarter) |> 
+  summarise(mortgage_rate = mean(housing_lending) / 100) |> 
+  ungroup() |> 
+  mutate(date = yearquarter(glue("{year}Q{quarter}"))) |> 
   as_tsibble(index = date, regular = TRUE)
 
 # *****************************************************************************
@@ -65,12 +70,12 @@ dat_model <- dat
 
 # Forecasting model
 model_lambda <- dat_model |>
-  features(.var = unemp, features = guerrero) |>
+  features(.var = mortgage_rate, features = guerrero) |>
   pull(lambda_guerrero) 
 
 model <- dat_model |> 
   model(
-    arima = ARIMA(formula = box_cox(x = unemp, 
+    arima = ARIMA(formula = box_cox(x = mortgage_rate, 
                                     lambda = model_lambda),
                   ic = "bic")
   )
@@ -130,19 +135,19 @@ vis_actuals <- dat |>
   as_tibble() |>
   slice_max(order_by = date, n = 2 * forecast_periods) |> 
   arrange(date) |> 
-  mutate(vjust = label_vjust(unemp))
+  mutate(vjust = label_vjust(mortgage_rate))
 
 # Create data for for visualisation - prepend last actual value of
-# unemployment rate
-last_actual_unempl_rate <- dat |> 
+# mortgage rate
+last_actual_mortgage_rate <- dat |> 
   as_tibble() |> 
   slice_max(order_by = date, n = 1) |> 
-  select(date, unemp)
+  select(date, mortgage_rate)
 
 vis_uncertainty <- bind_rows(
   forecast_uncertainty_sims, 
   tibble(.rep = as.character(1:forecast_uncertainty_reps), 
-         last_actual_unempl_rate |> rename(.sim = unemp))
+         last_actual_mortgage_rate |> rename(.sim = mortgage_rate))
 ) |> 
   arrange(.rep, date)
 
@@ -150,8 +155,8 @@ vis_forecast_mean <- bind_rows(
   forecast_mean |> 
     select(date, .mean) |> 
     mutate(type = "forecast"), 
-  last_actual_unempl_rate |> 
-    rename(.mean = unemp) |>
+  last_actual_mortgage_rate |> 
+    rename(.mean = mortgage_rate) |>
     mutate(type = "actual")
 ) |> 
   arrange(date) |> 
@@ -160,14 +165,14 @@ vis_forecast_mean <- bind_rows(
 vis_intervals <- bind_rows(
   forecast_uncertainty_intervals |> 
     mutate(type = "forecast"), 
-  last_actual_unempl_rate |> 
+  last_actual_mortgage_rate |> 
     mutate(type = "actual")
 ) |> 
-  mutate(conf_lower = ifelse(is.na(conf_lower), unemp, conf_lower), 
-         conf_upper = ifelse(is.na(conf_upper), unemp, conf_upper), 
-         central_lower = ifelse(is.na(central_lower), unemp, central_lower), 
-         central_upper = ifelse(is.na(central_upper), unemp, central_upper)) |> 
-  select(-unemp) |> 
+  mutate(conf_lower = ifelse(is.na(conf_lower), mortgage_rate, conf_lower), 
+         conf_upper = ifelse(is.na(conf_upper), mortgage_rate, conf_upper), 
+         central_lower = ifelse(is.na(central_lower), mortgage_rate, central_lower), 
+         central_upper = ifelse(is.na(central_upper), mortgage_rate, central_upper)) |> 
+  select(-mortgage_rate) |> 
   arrange(date) |> 
   pivot_longer(cols = c("conf_lower", "conf_upper", "central_lower", "central_upper"), 
                names_to = "limit", 
@@ -223,16 +228,16 @@ chart_forecasts <- ggplot() +
   # Actuals line
   geom_line(data = vis_actuals, 
             mapping = aes(x = date, 
-                          y = unemp), 
+                          y = mortgage_rate), 
             colour = colour_actuals, 
             size = linesize_actuals) + 
   
   # Actuals labels
   geom_text_custom(data = vis_actuals, 
                    mapping = aes(x = date, 
-                                 y = unemp, 
-                                 label = comma(x = 100 * unemp, 
-                                               accuracy = 0.1), 
+                                 y = mortgage_rate, 
+                                 label = comma(x = 100 * mortgage_rate, 
+                                               accuracy = 0.01), 
                                  vjust = vjust), 
                    colour = colour_actuals) + 
   
@@ -262,7 +267,7 @@ chart_forecasts <- ggplot() +
                    mapping = aes(x = date, 
                                  y = value, 
                                  label = comma(x = 100 * value, 
-                                               accuracy = 0.1), 
+                                               accuracy = 0.01), 
                                  vjust = vjust_up), 
                    colour = colour_forecast_intervals) + 
   geom_text_custom(data = vis_intervals |> 
@@ -270,7 +275,7 @@ chart_forecasts <- ggplot() +
                    mapping = aes(x = date, 
                                  y = value, 
                                  label = comma(x = 100 * value, 
-                                               accuracy = 0.1), 
+                                               accuracy = 0.01), 
                                  vjust = vjust_down), 
                    colour = colour_forecast_intervals) + 
   
@@ -286,14 +291,14 @@ chart_forecasts <- ggplot() +
                    mapping = aes(x = date, 
                                  y = .mean, 
                                  label = comma(x = 100 * .mean, 
-                                               accuracy = 0.1), 
+                                               accuracy = 0.01), 
                                  vjust = vjust), 
                    colour = colour_forecast_mean) + 
   
   # Actual points
   geom_point(data = vis_actuals, 
              mapping = aes(x = date, 
-                           y = unemp), 
+                           y = mortgage_rate), 
              colour = colour_actuals, 
              size = point_size) + 
   
@@ -311,23 +316,4 @@ output_chart(chart = chart_forecasts,
              ylab = "")
 
 # *****************************************************************************
-
-
-# *****************************************************************************
-# Save forecast ----
-
-# Forecast mean
-write_csv(x = forecast_mean, 
-          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_mean.csv")))
-
-# Forecast uncertainty simulations
-write_csv(x = forecast_uncertainty_sims, 
-          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_sims.csv")))
-
-# Forecast uncertainty intervals
-write_csv(x = forecast_uncertainty_intervals, 
-          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_intervals.csv")))
-
-# *****************************************************************************
-
 
