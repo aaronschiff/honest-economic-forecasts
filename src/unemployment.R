@@ -1,16 +1,16 @@
-# Forecasts of New Zealand's annual CPI inflation rate
+# Forecasts of New Zealand's seasonally-adjusted unemployment rate
 
 # Created by aaron@schiff.nz
 # https://github.com/aaronschiff/honest-economic-forecasts 
 
-# Data updated to: 2021 Q2
+# Data updated to: 2021 Q1
 
 # *****************************************************************************
 # Setup ----
 
 # Forecast configuration
-series <- "inflation"
-latest_data <- "2021Q2"
+series <- "unemployment"
+latest_data <- "2021Q1"
 forecast_periods <- 8
 forecast_uncertainty_reps <- 5000
 forecast_label_y <- 0.075
@@ -43,16 +43,15 @@ conflict_prefer(name = "lag", winner = "dplyr")
 
 # Read source data and select those for forecasting
 dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")), 
-                col_types = "ccnccccc") |>
+                col_types = "ccncciccccccc") |>
   clean_names() |> 
-  filter(group == "CPI All Groups for New Zealand") |>
   separate(col = period, into = c("year", "quarter"), sep = "\\.", 
            convert = TRUE) |>
   mutate(quarter = as.integer(quarter / 3)) |> 
   mutate(date = yearquarter(glue("{year}Q{quarter}"))) |>
   filter(year > 1989) |> 
-  select(date, year, quarter, cpi = data_value) |> 
-  mutate(inflation_rate = cpi / lag(cpi, n = 4) - 1) |> 
+  select(date, year, quarter, unemp = data_value) |> 
+  mutate(unemp = unemp / 100) |> 
   as_tsibble(index = date, regular = TRUE)
 
 # *****************************************************************************
@@ -67,7 +66,7 @@ dat_model <- dat
 # Forecasting model
 model <- dat_model |> 
   model(
-    arima = ARIMA(formula = inflation_rate, 
+    arima = ARIMA(formula = unemp, 
                   ic = "bic")
   )
 
@@ -126,19 +125,19 @@ vis_actuals <- dat |>
   as_tibble() |>
   slice_max(order_by = date, n = 2 * forecast_periods) |> 
   arrange(date) |> 
-  mutate(vjust = label_vjust(inflation_rate))
+  mutate(vjust = label_vjust(unemp))
 
 # Create data for for visualisation - prepend last actual value of
 # inflation rate
-last_actual_inflation_rate <- dat |> 
+last_actual_unempl_rate <- dat |> 
   as_tibble() |> 
   slice_max(order_by = date, n = 1) |> 
-  select(date, inflation_rate)
+  select(date, unemp)
 
 vis_uncertainty <- bind_rows(
   forecast_uncertainty_sims, 
   tibble(.rep = as.character(1:forecast_uncertainty_reps), 
-         last_actual_inflation_rate |> rename(.sim = inflation_rate))
+         last_actual_unempl_rate |> rename(.sim = unemp))
 ) |> 
   arrange(.rep, date)
 
@@ -146,8 +145,8 @@ vis_forecast_mean <- bind_rows(
   forecast_mean |> 
     select(date, .mean) |> 
     mutate(type = "forecast"), 
-  last_actual_inflation_rate |> 
-    rename(.mean = inflation_rate) |>
+  last_actual_unempl_rate |> 
+    rename(.mean = unemp) |>
     mutate(type = "actual")
 ) |> 
   arrange(date) |> 
@@ -156,14 +155,14 @@ vis_forecast_mean <- bind_rows(
 vis_intervals <- bind_rows(
   forecast_uncertainty_intervals |> 
     mutate(type = "forecast"), 
-  last_actual_inflation_rate |> 
+  last_actual_unempl_rate |> 
     mutate(type = "actual")
 ) |> 
-  mutate(conf_lower = ifelse(is.na(conf_lower), inflation_rate, conf_lower), 
-         conf_upper = ifelse(is.na(conf_upper), inflation_rate, conf_upper), 
-         central_lower = ifelse(is.na(central_lower), inflation_rate, central_lower), 
-         central_upper = ifelse(is.na(central_upper), inflation_rate, central_upper)) |> 
-  select(-inflation_rate) |> 
+  mutate(conf_lower = ifelse(is.na(conf_lower), unemp, conf_lower), 
+         conf_upper = ifelse(is.na(conf_upper), unemp, conf_upper), 
+         central_lower = ifelse(is.na(central_lower), unemp, central_lower), 
+         central_upper = ifelse(is.na(central_upper), unemp, central_upper)) |> 
+  select(-unemp) |> 
   arrange(date) |> 
   pivot_longer(cols = c("conf_lower", "conf_upper", "central_lower", "central_upper"), 
                names_to = "limit", 
@@ -219,15 +218,15 @@ chart_forecasts <- ggplot() +
   # Actuals line
   geom_line(data = vis_actuals, 
             mapping = aes(x = date, 
-                          y = inflation_rate), 
+                          y = unemp), 
             colour = colour_actuals, 
             size = linesize_actuals) + 
   
   # Actuals labels
   geom_text_custom(data = vis_actuals, 
                    mapping = aes(x = date, 
-                                 y = inflation_rate, 
-                                 label = comma(x = 100 * inflation_rate, 
+                                 y = unemp, 
+                                 label = comma(x = 100 * unemp, 
                                                accuracy = 0.1), 
                                  vjust = vjust), 
                    colour = colour_actuals) + 
@@ -289,14 +288,14 @@ chart_forecasts <- ggplot() +
   # Actual points
   geom_point(data = vis_actuals, 
              mapping = aes(x = date, 
-                           y = inflation_rate), 
+                           y = unemp), 
              colour = colour_actuals, 
              size = point_size) + 
   
   # Scales
-  scale_y_continuous(labels = percent_format(accuracy = 1), 
-                     limits = c(-0.02, 0.08), 
-                     breaks = seq(-0.02, 0.08, 0.01)) + 
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     limits = c(0, 0.08),
+                     breaks = seq(0, 0.08, 0.01)) +
   scale_x_yearquarter(date_breaks = "1 year")
 
 output_chart(chart = chart_forecasts, 
@@ -306,23 +305,3 @@ output_chart(chart = chart_forecasts,
              xlab = "", 
              ylab = "")
 
-# *****************************************************************************
-
-
-# *****************************************************************************
-# Save forecast ----
-
-# Forecast mean
-write_csv(x = forecast_mean, 
-          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_mean.csv")))
-
-# Forecast uncertainty simulations
-write_csv(x = forecast_uncertainty_sims, 
-          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_sims.csv")))
-
-# Forecast uncertainty intervals
-write_csv(x = forecast_uncertainty_intervals, 
-          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_intervals.csv")))
-
-
-# *****************************************************************************
