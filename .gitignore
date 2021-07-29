@@ -3,3 +3,5 @@
 .RData
 .Ruserdata
 forecasts/*
+data/unemployment/raw/*
+
