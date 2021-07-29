@@ -288,3 +288,23 @@ output_chart(chart = chart_forecasts,
              xlab = "", 
              ylab = "")
 
+# *****************************************************************************
+
+
+# *****************************************************************************
+# Save forecast ----
+
+# Forecast mean
+write_csv(x = forecast_mean, 
+          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_mean.csv")))
+
+# Forecast uncertainty simulations
+write_csv(x = forecast_uncertainty_sims, 
+          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_sims.csv")))
+
+# Forecast uncertainty intervals
+write_csv(x = forecast_uncertainty_intervals, 
+          file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_intervals.csv")))
+
+
+# *****************************************************************************
