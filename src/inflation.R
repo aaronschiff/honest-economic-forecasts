@@ -13,6 +13,7 @@ series <- "inflation"
 latest_data <- "2021Q2"
 forecast_periods <- 8
 forecast_uncertainty_reps <- 5000
+forecast_label_y <- 0.075
 
 # Libraries
 library(conflicted)
@@ -174,6 +175,23 @@ chart_forecasts <- ggplot() +
   geom_hline(yintercept = 0, 
              size = linesize_zeroline, 
              colour = colour_zeroline) + 
+  
+  # Actual / forecast line
+  geom_vline(xintercept = as.Date(yearquarter(latest_data)), 
+             size = linesize_af, 
+             colour = colour_af, 
+             linetype = linetype_af) + 
+  
+  # Forecast period label
+  annotate(geom = "text", 
+           x = as.Date(yearquarter(latest_data)), 
+           y = forecast_label_y, 
+           hjust = -0.15, 
+           label = "Forecast", 
+           family = "Fira Sans Custom", 
+           fontface = "bold", 
+           size = 2.5, 
+           colour = colour_af_label) + 
   
   # Uncertainty simulations
   geom_line(data = vis_uncertainty, 

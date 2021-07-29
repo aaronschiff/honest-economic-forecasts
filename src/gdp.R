@@ -206,6 +206,23 @@ chart_forecasts <- ggplot() +
              size = linesize_zeroline, 
              colour = colour_zeroline) + 
   
+  # Actual / forecast line
+  geom_vline(xintercept = as.Date(yearquarter(latest_data)), 
+             size = linesize_af, 
+             colour = colour_af, 
+             linetype = linetype_af) + 
+  
+  # Forecast period label
+  annotate(geom = "text", 
+           x = as.Date(yearquarter(latest_data)), 
+           y = max(vis_actuals$growth_rate), 
+           hjust = -0.15, 
+           label = "Forecast", 
+           family = "Fira Sans Custom", 
+           fontface = "bold", 
+           size = 2.5, 
+           colour = colour_af_label) + 
+  
   # Uncertainty simulations
   geom_line(data = vis_uncertainty, 
             mapping = aes(x = date, 
