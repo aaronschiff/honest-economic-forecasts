@@ -29,6 +29,7 @@ library(distributional)
 library(lubridate)
 library(tsibble)
 library(readxl)
+library(shadowtext)
 library(as.charts)   # Custom library for formatting charts nicely
 source(here("src/utility.R"))
 source(here("src/constants.R"))
@@ -189,6 +190,7 @@ chart_forecasts <- ggplot() +
   geom_vline(xintercept = as.Date(yearquarter(latest_data)), 
              size = linesize_af, 
              colour = colour_af, 
+             alpha = alpha_af, 
              linetype = linetype_af) + 
   
   # Forecast period label
@@ -208,6 +210,7 @@ chart_forecasts <- ggplot() +
                           y = .sim, 
                           group = .rep), 
             size = linesize_uncertainty, 
+            colour = colour_uncertainty, 
             alpha = alpha_uncertainty) + 
   
   # Mean forecast points

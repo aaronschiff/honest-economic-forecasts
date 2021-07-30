@@ -53,13 +53,15 @@ label_vjust = function(x) {
 
 geom_text_custom <- function(family = "Fira Sans Custom",
                              rel_size = 1,
-                             abs_size = 2.5,
+                             abs_size = 2,
                              fontface = "bold",
                              ...) {
-  t <- ggplot2::geom_text(family = family,
-                          size = rel_size * abs_size,
-                          fontface = fontface,
-                          ...)
+  t <- shadowtext::geom_shadowtext(family = family,
+                                   size = rel_size * abs_size,
+                                   fontface = fontface,
+                                   bg.colour = "white", 
+                                   bg.r = 0.08, 
+                                   ...)
   return(t)
 }
 

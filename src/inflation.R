@@ -180,6 +180,7 @@ chart_forecasts <- ggplot() +
   geom_vline(xintercept = as.Date(yearquarter(latest_data)), 
              size = linesize_af, 
              colour = colour_af, 
+             alpha = alpha_af, 
              linetype = linetype_af) + 
   
   # Forecast period label
@@ -199,6 +200,7 @@ chart_forecasts <- ggplot() +
                           y = .sim, 
                           group = .rep), 
             size = linesize_uncertainty, 
+            colour = colour_uncertainty, 
             alpha = alpha_uncertainty) + 
   
   # Mean forecast points
