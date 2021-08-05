@@ -3,14 +3,14 @@
 # Created by aaron@schiff.nz
 # https://github.com/aaronschiff/honest-economic-forecasts 
 
-# Data updated to: 2021 Q1
+# Data updated to: 2021 Q2
 
 # *****************************************************************************
 # Setup ----
 
 # Forecast configuration
 series <- "unemployment"
-latest_data <- "2021Q1"
+latest_data <- "2021Q2"
 forecast_periods <- 8
 forecast_uncertainty_reps <- 5000
 forecast_label_y <- 0.075
@@ -70,7 +70,7 @@ model_lambda <- dat_model |>
 
 model <- dat_model |> 
   model(
-    arima = ARIMA(formula = box_cox(x = unemp, 
+    arima = ARIMA(formula = box_cox(x = unemp,
                                     lambda = model_lambda),
                   ic = "bic")
   )
