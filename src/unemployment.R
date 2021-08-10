@@ -75,11 +75,9 @@ model <- dat_model |>
                   ic = "bic"), 
     ets = ETS(formula = box_cox(x = unemp,
                                 lambda = model_lambda), 
-              ic = "bic"), 
-    nn = NNETAR(formula = box_cox(x = unemp,
-                                  lambda = model_lambda))
+              ic = "bic")
   ) |> 
-  mutate(blend = (arima + ets + nn) / 3)
+  mutate(blend = (arima + ets) / 2)
 
 # Mean forecast
 forecast_mean <- model |> 
@@ -361,11 +359,9 @@ model_validation <- dat_model_validation |>
                   ic = "bic"), 
     ets = ETS(formula = box_cox(x = unemp,
                                 lambda = model_lambda_validation), 
-              ic = "bic"), 
-    nn = NNETAR(formula = box_cox(x = unemp,
-                                  lambda = model_lambda_validation))
+              ic = "bic")
   ) |> 
-  mutate(blend = (arima + ets + nn) / 3)
+  mutate(blend = (arima + ets) / 2)
 
 # Mean forecast
 forecast_mean_validation <- model_validation |> 
