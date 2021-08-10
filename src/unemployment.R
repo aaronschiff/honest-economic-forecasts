@@ -379,8 +379,7 @@ forecast_uncertainty_sims_validation <- model_validation |>
   filter(.model == "blend") |> 
   select(-.model)
 
-# Forecast uncertainty intervals of growth rates as percentiles of 
-# simulated inflation rates
+# Forecast uncertainty intervals as percentiles of simulated values
 forecast_uncertainty_intervals_validation <- full_join(
   # 90% interval lower limit
   x = forecast_uncertainty_sims_validation |> 
