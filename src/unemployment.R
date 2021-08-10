@@ -28,12 +28,14 @@ library(distributional)
 library(lubridate)
 library(tsibble)
 library(as.charts)   # Custom library for formatting charts nicely
-source(here("src/utility.R"))
-source(here("src/constants.R"))
 
 # Conflicts
 conflict_prefer(name = "filter", winner = "dplyr")
 conflict_prefer(name = "lag", winner = "dplyr")
+
+# Utility
+source(here("src/utility.R"))
+source(here("src/constants.R"))
 
 # *****************************************************************************
 
