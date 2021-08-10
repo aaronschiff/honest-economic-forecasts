@@ -66,15 +66,18 @@ dat_model <- dat
 
 # Forecasting model
 model <- dat_model |> 
+  filter(!is.na(inflation_rate)) |> 
   model(
-    arima = ARIMA(formula = inflation_rate, 
-                  ic = "bic")
-  )
+    arima = ARIMA(formula = inflation_rate, ic = "bic"), 
+    ets = ETS(formula = inflation_rate, ic = "bic")
+  ) |> 
+  mutate(blend = (arima + ets) / 2)
 
 # Mean forecast
 forecast_mean <- model |> 
   forecast(h = forecast_periods) |> 
   as_tibble() |>
+  filter(.model == "blend") |> 
   select(date, .mean)
 
 # Uncertainty simulations
@@ -83,6 +86,7 @@ forecast_uncertainty_sims <- model |>
            times = forecast_uncertainty_reps, 
            bootstrap = FALSE) |> 
   as_tibble() |> 
+  filter(.model == "blend") |> 
   select(-.model)
 
 # Forecast uncertainty intervals of growth rates as percentiles of 
@@ -326,5 +330,155 @@ write_csv(x = forecast_uncertainty_sims,
 write_csv(x = forecast_uncertainty_intervals, 
           file = here(glue("forecasts/{series}/{latest_data}/{series}_forecast_uncertainty_intervals.csv")))
 
+# *****************************************************************************
+
+
+# *****************************************************************************
+# Validation ---- 
+# Validate forecasts by using data up to end of 2017 to forecast for 2018 &
+# 2019, then compare to actuals
+
+# Data for forecasting
+dat_model_validation <- dat |> filter(year < 2018)
+
+# Forecasting model
+model_validation <- dat_model_validation |> 
+  filter(!is.na(inflation_rate)) |> 
+  model(
+    arima = ARIMA(formula = inflation_rate, ic = "bic"), 
+    ets = ETS(formula = inflation_rate, ic = "bic")
+  ) |> 
+  mutate(blend = (arima + ets) / 2)
+
+# Mean forecast
+forecast_mean_validation <- model_validation |> 
+  forecast(h = forecast_periods) |> 
+  as_tibble() |>
+  filter(.model == "blend") |> 
+  select(date, .mean)
+
+# Uncertainty simulations
+forecast_uncertainty_sims_validation <- model_validation |> 
+  generate(h = forecast_periods, 
+           times = forecast_uncertainty_reps, 
+           bootstrap = FALSE) |> 
+  as_tibble() |> 
+  filter(.model == "blend") |> 
+  select(-.model)
+
+# Forecast uncertainty intervals as percentiles of simulated values
+forecast_uncertainty_intervals_validation <- full_join(
+  # 90% interval lower limit
+  x = forecast_uncertainty_sims_validation |> 
+    group_by(date) |>
+    summarise(conf_lower = quantile(x = .sim, probs = 0.05)), 
+  
+  # 90% interval upper limit
+  y = forecast_uncertainty_sims_validation |> 
+    group_by(date) |>
+    summarise(conf_upper = quantile(x = .sim, probs = 0.95)), 
+  
+  by = "date"
+) |> 
+  # 50% interval lower limit
+  full_join(
+    y = forecast_uncertainty_sims_validation |> 
+      group_by(date) |>
+      summarise(central_lower = quantile(x = .sim, probs = 0.25)), 
+    by = "date"
+  ) |> 
+  # 50% interval upper limit
+  full_join(
+    y = forecast_uncertainty_sims_validation |> 
+      group_by(date) |>
+      summarise(central_upper = quantile(x = .sim, probs = 0.75)), 
+    by = "date"
+  ) |> 
+  pivot_longer(cols = -date, names_to = "limit", values_to = "value")
+
+# Create visualisation
+chart_validation <- ggplot() +
+  # Zero line
+  geom_hline(yintercept = 0, 
+             size = linesize_zeroline, 
+             colour = colour_zeroline) +
+  
+  # Uncertainty simulations
+  geom_line(data = forecast_uncertainty_sims_validation, 
+            mapping = aes(x = date, 
+                          y = .sim, 
+                          group = .rep), 
+            size = linesize_uncertainty, 
+            colour = colour_uncertainty, 
+            alpha = alpha_uncertainty) + 
+  
+  # Mean forecast points
+  geom_point(data = forecast_mean_validation, 
+             mapping = aes(x = date, 
+                           y = .mean), 
+             colour = colour_forecast_mean, 
+             size = point_size) + 
+  
+  # 90% uncertainty interval points
+  geom_point(data = forecast_uncertainty_intervals_validation |> 
+               filter(limit %in% c("conf_lower", "conf_upper")), 
+             mapping = aes(x = date, 
+                           y = value), 
+             colour = colour_forecast_intervals, 
+             size = point_size) + 
+  
+  # Actuals line
+  geom_line(data = dat |> filter(date %in% forecast_mean_validation$date), 
+            mapping = aes(x = date, 
+                          y = inflation_rate), 
+            colour = colour_actuals, 
+            size = linesize_actuals) + 
+  
+  # 90% uncertainty interval lines
+  geom_line(data = forecast_uncertainty_intervals_validation |> 
+              filter(limit %in% c("conf_lower", "conf_upper")), 
+            mapping = aes(x = date, 
+                          y = value, 
+                          group = limit), 
+            colour = colour_forecast_intervals, 
+            size = linesize_forecast_intervals, 
+            linetype = linetype_forecast_intervals) + 
+  
+  # Central (50%) uncertainty lines
+  geom_line(data = forecast_uncertainty_intervals_validation |> 
+              filter(limit %in% c("central_lower", "central_upper")), 
+            mapping = aes(x = date, 
+                          y = value, 
+                          group = limit), 
+            colour = colour_forecast_central, 
+            size = linesize_forecast_central, 
+            linetype = linetype_forecast_central) + 
+  
+  # Mean forecast line
+  geom_line(data = forecast_mean_validation, 
+            mapping = aes(x = date, 
+                          y = .mean), 
+            colour = colour_forecast_mean, 
+            size = linesize_forecast_mean) + 
+  
+  # Actual points
+  geom_point(data = dat |> filter(date %in% forecast_mean_validation$date), 
+             mapping = aes(x = date, 
+                           y = inflation_rate), 
+             colour = colour_actuals, 
+             size = point_size) + 
+  
+  # Scales
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     limits = c(-0.025, 0.07),
+                     breaks = seq(-0.02, 0.07, 0.01)) +
+  scale_x_yearquarter(date_breaks = "3 months")
+
+output_chart(chart = chart_validation, 
+             filename = glue("{series}_validation"), 
+             path = here(glue("forecasts/{series}")), 
+             orientation = "wide", 
+             xlab = "", 
+             ylab = "")
 
 # *****************************************************************************

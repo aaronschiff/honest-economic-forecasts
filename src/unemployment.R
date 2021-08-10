@@ -488,7 +488,7 @@ chart_validation <- ggplot() +
   scale_x_yearquarter(date_breaks = "1 year")
 
 output_chart(chart = chart_validation, 
-             filename = glue("{series}_validation.png"), 
+             filename = glue("{series}_validation"), 
              path = here(glue("forecasts/{series}")), 
              orientation = "wide", 
              xlab = "", 
