@@ -4,6 +4,10 @@
 # *****************************************************************************
 # Setup ----
 
+# Data series to use
+series <- "inflation"
+latest_data <- "2021Q2"
+
 # Libraries
 library(conflicted)
 library(tidyverse)
@@ -29,10 +33,7 @@ source(here("src/constants.R"))
 
 
 # *****************************************************************************
-
-series <- "inflation"
-latest_data <- "2021Q2"
-forecast_periods <- 8
+# Load data ---- 
 
 dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")), 
                 col_types = "ccnccccc") |>
@@ -52,6 +53,18 @@ dat_model <- dat |>
   filter(!is.na(inflation_rate)) |> 
   rename(value = inflation_rate)
 
+last_actual <- dat_model |> 
+  mutate(rn = row_number()) |> 
+  filter(date == yearquarter("2016Q1")) |> 
+  pull(rn)
+
+# *****************************************************************************
+
+
+# *****************************************************************************
+# Model tuning ---- 
+
+# Estimate and test accuracy of weighted ensemble model
 test_ensemble <- function(d, w, start) {
   cat("* Testing ensemble with weight: ", w, "\n\n")
   
@@ -97,29 +110,18 @@ test_ensemble <- function(d, w, start) {
   return(a)
 }
 
+# Run tests 
 tests <- tibble(
-  w = c(0, 0.25, 0.5, 0.75, 1.0)
+  w = seq(from = 0, to = 1, by = 0.05)
 ) |> 
   rowwise() |> 
   mutate(accuracy = list(test_ensemble(d = dat_model, 
                                        w = w, 
-                                       start = 101))) |> 
+                                       start = last_actual))) |> 
   unnest(cols = accuracy)
 
-tests <- tibble(
-  w = c(0.2, 0.3, 0.4, 0.5, 0.6)
-) |> 
-  rowwise() |> 
-  mutate(accuracy = list(test_ensemble(d = dat_model, 
-                                       w = w, 
-                                       start = 101))) |> 
-  unnest(cols = accuracy)
-
-tests <- tibble(
-  w = c(0.3, 0.35, 0.4, 0.45, 0.5)
-) |> 
-  rowwise() |> 
-  mutate(accuracy = list(test_ensemble(d = dat_model, 
-                                       w = w, 
-                                       start = 101))) |> 
-  unnest(cols = accuracy)
+tests |> 
+  ggplot(mapping = aes(x = w, 
+                       y = MAPE)) + 
+  geom_col() + 
+  scale_x_continuous(breaks = seq(0, 1, 0.05))
