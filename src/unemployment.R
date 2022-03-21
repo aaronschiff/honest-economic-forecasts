@@ -3,14 +3,14 @@
 # Created by aaron@schiff.nz
 # https://github.com/aaronschiff/honest-economic-forecasts 
 
-# Data updated to: 2021 Q2
+# Data updated to: 2021 Q4
 
 # *****************************************************************************
 # Setup ----
 
 # Forecast configuration
 series <- "unemployment"
-latest_data <- "2021Q2"
+latest_data <- "2021Q4"
 forecast_periods <- 8
 forecast_uncertainty_reps <- 5000
 forecast_label_y <- 0.075
@@ -45,14 +45,17 @@ source(here("src/constants.R"))
 
 # Read source data and select those for forecasting
 dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")), 
-                col_types = "ccncciccccccc") |>
-  clean_names() |> 
-  separate(col = period, into = c("year", "quarter"), sep = "\\.", 
+                col_types = "cn", 
+                skip = 1) |>
+  clean_names() |>  
+  rename(period = x1, unemp = hlfq_s1f3s) |> 
+  filter(!is.na(unemp)) |> 
+  separate(col = period, into = c("year", "quarter"), sep = "Q", 
            convert = TRUE) |>
-  mutate(quarter = as.integer(quarter / 3)) |> 
+  mutate(quarter = as.integer(quarter)) |> 
   mutate(date = yearquarter(glue("{year}Q{quarter}"))) |>
   filter(year > 1989) |> 
-  select(date, year, quarter, unemp = data_value) |> 
+  select(date, year, quarter, unemp) |> 
   mutate(unemp = unemp / 100) |> 
   as_tsibble(index = date, regular = TRUE)
 

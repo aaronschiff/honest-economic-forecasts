@@ -5,12 +5,13 @@
 # Setup ----
 
 # Data series to use
-series <- "inflation"
-latest_data <- "2021Q2"
+series <- "gdp"
+latest_data <- "2021Q1"
 
 # Libraries
 library(conflicted)
 library(tidyverse)
+library(readxl)
 library(glue)
 library(here)
 library(janitor)
@@ -36,22 +37,19 @@ source(here("src/constants.R"))
 # Load data ---- 
 
 dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")), 
-                col_types = "ccnccccc") |>
+                col_types = "ccccnn") |>
   clean_names() |> 
-  filter(group == "CPI All Groups for New Zealand") |>
-  separate(col = period, into = c("year", "quarter"), sep = "\\.", 
-           convert = TRUE) |>
-  mutate(quarter = as.integer(quarter / 3)) |> 
-  mutate(date = yearquarter(glue("{year}Q{quarter}"))) |>
-  filter(year > 1989) |> 
-  select(date, year, quarter, cpi = data_value) |> 
-  mutate(inflation_rate = cpi / lag(cpi, n = 4) - 1) |> 
+  filter(level == "Total GDP") |>
+  mutate(date = yearquarter(quarter)) |>
+  rename(gdp = amount) |> 
+  mutate(growth_rate = gdp / lag(gdp) - 1) |> 
   as_tsibble(index = date, regular = TRUE)
 
 dat_model <- dat |> 
-  select(date, inflation_rate) |> 
-  filter(!is.na(inflation_rate)) |> 
-  rename(value = inflation_rate)
+  filter(year(date) > 1989) |> 
+  select(date, growth_rate) |> 
+  filter(!is.na(growth_rate)) |> 
+  rename(value = growth_rate)
 
 last_actual <- dat_model |> 
   mutate(rn = row_number()) |> 
@@ -122,6 +120,8 @@ tests <- tibble(
 
 tests |> 
   ggplot(mapping = aes(x = w, 
-                       y = MAPE)) + 
+                       y = MAPE, 
+                       label = comma(x = MAPE, accuracy = 0.1))) + 
   geom_col() + 
+  geom_text(vjust = -0.2, size = 3) + 
   scale_x_continuous(breaks = seq(0, 1, 0.05))

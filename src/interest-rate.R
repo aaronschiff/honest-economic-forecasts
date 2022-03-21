@@ -4,14 +4,14 @@
 # Created by aaron@schiff.nz
 # https://github.com/aaronschiff/honest-economic-forecasts 
 
-# Data updated to: 2021 Q2
+# Data updated to: 2021 Q4
 
 # *****************************************************************************
 # Setup ----
 
 # Forecast configuration
 series <- "interest-rate"
-latest_data <- "2021Q2"
+latest_data <- "2021Q4"
 forecast_periods <- 8
 forecast_uncertainty_reps <- 5000
 forecast_label_y <- 0.075
@@ -60,7 +60,8 @@ dat <- read_excel(path = here(glue("data/{series}/{latest_data}/{series}.xlsx"))
   summarise(mortgage_rate = mean(housing_lending) / 100) |> 
   ungroup() |> 
   mutate(date = yearquarter(glue("{year}Q{quarter}"))) |> 
-  as_tsibble(index = date, regular = TRUE)
+  as_tsibble(index = date, regular = TRUE) |> 
+  filter(year < 2022)
 
 # *****************************************************************************
 
