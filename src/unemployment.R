@@ -349,154 +349,84 @@ write_csv(x = forecast_uncertainty_intervals,
 # Validate forecasts by using data up to end of 2017 to forecast for 2018 &
 # 2019, then compare to actuals
 
-# Data for forecasting
-dat_model_validation <- dat |> filter(year < 2018)
+select_lambda <- function(x) {
+  f <- features(.tbl = as_tsibble(x), .var = unemp, features = guerrero)
+  l <- f$lambda_guerrero
+  return(l)
+}
 
-# Forecasting model
-model_lambda_validation <- dat_model_validation |>
-  features(.var = unemp, features = guerrero) |>
-  pull(lambda_guerrero) 
+apply_bc <- function(d, l) {
+  dbc <- d |> 
+    mutate(unemp = box_cox(x = unemp, lambda = l))
+  return(dbc)
+}
+
+model_unempl <- function(d) {
+  m <- as_tsibble(d) |> 
+    model(
+      arima = ARIMA(formula = unemp,ic = "bic"), 
+      ets = ETS(formula = unemp, ic = "bic")
+    ) |> 
+    mutate(blend = (arima + ets) / 2)
+  return(m$blend)
+}
+
+dat_model_validation <- dat |> 
+  stretch_tsibble(.init = nrow(dat) - 20, .step = 1)
 
 model_validation <- dat_model_validation |> 
-  model(
-    arima = ARIMA(formula = box_cox(x = unemp,
-                                    lambda = model_lambda_validation),
-                  ic = "bic"), 
-    ets = ETS(formula = box_cox(x = unemp,
-                                lambda = model_lambda_validation), 
-              ic = "bic")
-  ) |> 
-  mutate(blend = (arima + ets) / 2)
-
-# Mean forecast
-forecast_mean_validation <- model_validation |> 
-  forecast(h = forecast_periods) |> 
-  as_tibble() |>
-  filter(.model == "blend") |> 
-  select(date, .mean)
-
-# Uncertainty simulations
-forecast_uncertainty_sims_validation <- model_validation |> 
-  generate(h = forecast_periods, 
-           times = forecast_uncertainty_reps, 
-           bootstrap = FALSE) |> 
   as_tibble() |> 
-  filter(.model == "blend") |> 
-  select(-.model)
+  nest_by(.id) |> 
+  mutate(data = list(as_tsibble(data))) |> 
+  mutate(l = select_lambda(data)) |> 
+  mutate(data_bc = list(apply_bc(d = data, l = l))) |> 
+  mutate(m = model_unempl(d = data_bc)) |> 
+  print()
 
-# Forecast uncertainty intervals as percentiles of simulated values
-forecast_uncertainty_intervals_validation <- full_join(
-  # 90% interval lower limit
-  x = forecast_uncertainty_sims_validation |> 
-    group_by(date) |>
-    summarise(conf_lower = quantile(x = .sim, probs = 0.05)), 
-  
-  # 90% interval upper limit
-  y = forecast_uncertainty_sims_validation |> 
-    group_by(date) |>
-    summarise(conf_upper = quantile(x = .sim, probs = 0.95)), 
-  
-  by = "date"
-) |> 
-  # 50% interval lower limit
-  full_join(
-    y = forecast_uncertainty_sims_validation |> 
-      group_by(date) |>
-      summarise(central_lower = quantile(x = .sim, probs = 0.25)), 
-    by = "date"
-  ) |> 
-  # 50% interval upper limit
-  full_join(
-    y = forecast_uncertainty_sims_validation |> 
-      group_by(date) |>
-      summarise(central_upper = quantile(x = .sim, probs = 0.75)), 
-    by = "date"
-  ) |> 
-  pivot_longer(cols = -date, names_to = "limit", values_to = "value")
+forecast_mean_validation <- model_validation |>
+  mutate(fc = list(forecast(object = m, h = 20L))) |>
+  select(.id, l, fc) |> 
+  unnest(cols = fc) |> 
+  ungroup() |> 
+  select(.id, l, date, .mean) |> 
+  mutate(.mean = inv_box_cox(x = .mean, lambda = l)) |> 
+  select(.id, date, .mean) 
 
-# Create visualisation
-chart_validation <- ggplot() +
-  # Zero line
-  geom_hline(yintercept = 0, 
-             size = linesize_zeroline, 
-             colour = colour_zeroline) +
-  
-  # Uncertainty simulations
-  geom_line(data = forecast_uncertainty_sims_validation, 
-            mapping = aes(x = date, 
-                          y = .sim, 
-                          group = .rep), 
-            size = linesize_uncertainty, 
-            colour = colour_uncertainty, 
-            alpha = alpha_uncertainty) + 
-  
-  # Mean forecast points
-  geom_point(data = forecast_mean_validation, 
-             mapping = aes(x = date, 
-                           y = .mean), 
-             colour = colour_forecast_mean, 
-             size = point_size) + 
-  
-  # 90% uncertainty interval points
-  geom_point(data = forecast_uncertainty_intervals_validation |> 
-               filter(limit %in% c("conf_lower", "conf_upper")), 
-             mapping = aes(x = date, 
-                           y = value), 
-             colour = colour_forecast_intervals, 
-             size = point_size) + 
-  
-  # Actuals line
-  geom_line(data = dat |> filter(date %in% forecast_mean_validation$date), 
-            mapping = aes(x = date, 
-                          y = unemp), 
-            colour = colour_actuals, 
-            size = linesize_actuals) + 
-  
-  # 90% uncertainty interval lines
-  geom_line(data = forecast_uncertainty_intervals_validation |> 
-              filter(limit %in% c("conf_lower", "conf_upper")), 
-            mapping = aes(x = date, 
-                          y = value, 
-                          group = limit), 
-            colour = colour_forecast_intervals, 
-            size = linesize_forecast_intervals, 
-            linetype = linetype_forecast_intervals) + 
-  
-  # Central (50%) uncertainty lines
-  geom_line(data = forecast_uncertainty_intervals_validation |> 
-              filter(limit %in% c("central_lower", "central_upper")), 
-            mapping = aes(x = date, 
-                          y = value, 
-                          group = limit), 
-            colour = colour_forecast_central, 
-            size = linesize_forecast_central, 
-            linetype = linetype_forecast_central) + 
-  
-  # Mean forecast line
-  geom_line(data = forecast_mean_validation, 
-            mapping = aes(x = date, 
-                          y = .mean), 
-            colour = colour_forecast_mean, 
-            size = linesize_forecast_mean) + 
-  
-  # Actual points
-  geom_point(data = dat |> filter(date %in% forecast_mean_validation$date), 
-             mapping = aes(x = date, 
-                           y = unemp), 
-             colour = colour_actuals, 
-             size = point_size) + 
-  
-  # Scales
-  scale_y_continuous(labels = percent_format(accuracy = 1),
-                     limits = c(0.02, 0.07),
-                     breaks = seq(0, 0.08, 0.01)) +
-  scale_x_yearquarter(date_breaks = "1 year")
+forecast_uncertainty_validation <- model_validation |> 
+  mutate(us = list(generate(x = m, 
+                            h = 20L, 
+                            times = 5000, 
+                            bootstrap = FALSE))) 
 
-output_chart(chart = chart_validation, 
-             filename = glue("{series}_validation"), 
-             path = here(glue("forecasts/{series}")), 
-             orientation = "wide", 
-             xlab = "", 
-             ylab = "")
+forecast_uncertainty_validation_ci <- forecast_uncertainty_validation |> 
+  mutate(us = list(as_tibble(us))) |> 
+  select(.id, l, us) |> 
+  unnest(cols = us) |> 
+  ungroup() |> 
+  mutate(.sim = inv_box_cox(x = .sim, lambda = l)) |> 
+  group_by(.id, date) |> 
+  summarise(conf_lower = quantile(.sim, probs = 0.05), 
+            conf_upper = quantile(.sim, probs = 0.95), 
+            central_lower = quantile(.sim, probs = 0.25), 
+            central_upper = quantile(.sim, probs = 0.75)) |> 
+  ungroup() 
+
+dat_chart_validation <- forecast_mean_validation |> 
+  left_join(y = forecast_uncertainty_validation_ci, 
+            by = c(".id", "date")) |> 
+  filter(year(date) < 2022)
+
+chart_validation <- dat_chart_validation |> 
+  ggplot(mapping = aes(x = date)) + 
+  geom_pointrange(mapping = aes(y = .mean, 
+                                ymin = conf_lower, 
+                                ymax = conf_upper), 
+                  colour = "firebrick4") + 
+  geom_point(mapping = aes(y = unemp), 
+             colour = "cornflowerblue", 
+             data = dat |> filter(year > 2014)) + 
+  facet_wrap(facets = vars(.id), ncol = 4)
+
+
 
 # *****************************************************************************
