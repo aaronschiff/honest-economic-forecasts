@@ -362,61 +362,142 @@ apply_bc <- function(d, l) {
 }
 
 model_unempl <- function(d) {
-  m <- as_tsibble(d) |> 
+  m <- d |> 
     model(
-      arima = ARIMA(formula = unemp,ic = "bic"), 
-      ets = ETS(formula = unemp, ic = "bic")
-    ) |> 
-    mutate(blend = (arima + ets) / 2)
-  return(m$blend)
+      arima = ARIMA(formula = unemp, ic = "bic"), 
+    ) 
+  return(m$arima)
 }
 
-dat_model_validation <- dat |> 
-  stretch_tsibble(.init = nrow(dat) - 20, .step = 1)
+folds_for_window <- function(d, w, h) {
+  f <- d |> 
+    tail(10 + h + w - 1) |> 
+    slide_tsibble(.size = w) |> 
+    as_tibble()
+  return(f)
+}
+
+dat_model_validation <- tibble(
+  w = seq(20L, 80L, 4L)
+) |> 
+  rowwise() |> 
+  mutate(dat_fold = list(folds_for_window(d = dat, 
+                                          w = w, 
+                                          h = 8L))) |> 
+  unnest(cols = dat_fold) |> 
+  ungroup() |> 
+  arrange(w, .id, date)
 
 model_validation <- dat_model_validation |> 
-  as_tibble() |> 
-  nest_by(.id) |> 
-  mutate(data = list(as_tsibble(data))) |> 
+  nest_by(w, .id) |> 
+  mutate(data = list(as_tsibble(data, index = date))) |> 
   mutate(l = select_lambda(data)) |> 
   mutate(data_bc = list(apply_bc(d = data, l = l))) |> 
-  mutate(m = model_unempl(d = data_bc)) |> 
-  print()
+  mutate(arima_bc = model_unempl(d = data_bc), 
+         arima = model_unempl(d = data))
 
-forecast_mean_validation <- model_validation |>
-  mutate(fc = list(forecast(object = m, h = 20L))) |>
-  select(.id, l, fc) |> 
-  unnest(cols = fc) |> 
+forecast_mean_validation <- bind_rows(
+  model_validation |>
+    mutate(fc_arima_bc = list(forecast(object = arima_bc, h = 8L))) |> 
+    select(w, .id, l, fc_arima_bc) |> 
+    unnest(cols = fc_arima_bc) |> 
+    ungroup() |> 
+    mutate(.mean = inv_box_cox(x = .mean, lambda = l)) |> 
+    mutate(bc = "yes"), 
+  model_validation |>
+    mutate(fc_arima = list(forecast(object = arima, h = 8L))) |> 
+    select(w, .id, l, fc_arima) |> 
+    unnest(cols = fc_arima) |> 
+    ungroup() |> 
+    mutate(bc = "no")
+) |> 
+  select(bc, w, .id, date, .mean, l) |> 
+  arrange(bc, w, .id, date) |> 
+  group_by(bc, w, .id) |> 
+  mutate(h = row_number()) |> 
   ungroup() |> 
-  select(.id, l, date, .mean) |> 
-  mutate(.mean = inv_box_cox(x = .mean, lambda = l)) |> 
-  select(.id, date, .mean) 
+  select(-l) 
 
 forecast_uncertainty_validation <- model_validation |> 
-  mutate(us = list(generate(x = m, 
-                            h = 20L, 
-                            times = 5000, 
-                            bootstrap = FALSE))) 
+  mutate(us = list(generate(x = arima, 
+                            h = 8L, 
+                            times = 1000, 
+                            bootstrap = FALSE)), 
+         us_bc = list(generate(x = arima_bc, 
+                               h = 8L, 
+                               times = 1000, 
+                               bootstrap = FALSE))) 
 
-forecast_uncertainty_validation_ci <- forecast_uncertainty_validation |> 
-  mutate(us = list(as_tibble(us))) |> 
-  select(.id, l, us) |> 
-  unnest(cols = us) |> 
-  ungroup() |> 
-  mutate(.sim = inv_box_cox(x = .sim, lambda = l)) |> 
-  group_by(.id, date) |> 
+forecast_uncertainty_validation_ci <- bind_rows(
+  forecast_uncertainty_validation |> 
+    mutate(us_bc = list(as_tibble(us_bc))) |> 
+    select(w, .id, l, us_bc) |> 
+    unnest(cols = us_bc) |> 
+    ungroup() |> 
+    mutate(.sim = inv_box_cox(x = .sim, lambda = l)) |> 
+    mutate(bc = "yes"), 
+  forecast_uncertainty_validation |> 
+    mutate(us = list(as_tibble(us))) |> 
+    select(w, .id, l, us) |> 
+    unnest(cols = us) |> 
+    ungroup() |> 
+    mutate(bc = "no")
+) |> 
+  group_by(bc, w, .id, date) |> 
   summarise(conf_lower = quantile(.sim, probs = 0.05), 
             conf_upper = quantile(.sim, probs = 0.95), 
             central_lower = quantile(.sim, probs = 0.25), 
             central_upper = quantile(.sim, probs = 0.75)) |> 
   ungroup() 
 
-dat_chart_validation <- forecast_mean_validation |> 
+dat_validation <- forecast_mean_validation |> 
   left_join(y = forecast_uncertainty_validation_ci, 
-            by = c(".id", "date")) |> 
-  filter(year(date) < 2022)
+            by = c("bc", "w", ".id", "date")) 
 
-chart_validation <- dat_chart_validation |> 
+dat_validation_summary <- dat_validation |> 
+  filter(year(date) < 2022) |> 
+  left_join(y = dat, by = "date") |> 
+  mutate(ape = abs((unemp - .mean) / unemp)) |> 
+  mutate(in_conf = ifelse((unemp < conf_upper) & (unemp > conf_lower), 1L, 0L), 
+         in_central = ifelse((unemp < central_upper) & (unemp > central_lower), 1L, 0L)) |> 
+  group_by(bc, w, h) |> 
+  summarise(mape = mean(ape), 
+            in_conf_n = sum(in_conf), 
+            in_central_n = sum(in_central), 
+            n = n()) |> 
+  ungroup() |> 
+  mutate(in_conf_pct = in_conf_n / n, 
+         in_central_pct = in_central_n / n)
+
+chart_validation_summary_mape <- dat_validation_summary |> 
+  group_by(bc, w) |> 
+  summarise(mean_mape = mean(mape)) |> 
+  ungroup() |> 
+  ggplot(mapping = aes(x = w, 
+                       y = mean_mape, 
+                       fill = bc)) + 
+  geom_col(position = position_dodge()) 
+
+chart_validation_summary_in_central <- dat_validation_summary |> 
+  group_by(bc, w) |> 
+  summarise(mean_in_central_pct = mean(in_central_pct)) |> 
+  ungroup() |> 
+  ggplot(mapping = aes(x = w, 
+                       y = mean_in_central_pct, 
+                       fill = bc)) + 
+  geom_col(position = position_dodge()) 
+
+chart_validation_summary_in_conf <- dat_validation_summary |> 
+  group_by(bc, w) |> 
+  summarise(mean_in_cont_pct = mean(in_conf_pct)) |> 
+  ungroup() |> 
+  ggplot(mapping = aes(x = w, 
+                       y = mean_in_cont_pct, 
+                       fill = bc)) + 
+  geom_col(position = position_dodge()) 
+
+chart_validation <- dat_validation |> 
+  filter(w == 36L, bc == "no") |> 
   ggplot(mapping = aes(x = date)) + 
   geom_pointrange(mapping = aes(y = .mean, 
                                 ymin = conf_lower, 
@@ -425,7 +506,7 @@ chart_validation <- dat_chart_validation |>
   geom_point(mapping = aes(y = unemp), 
              colour = "cornflowerblue", 
              data = dat |> filter(year > 2014)) + 
-  facet_wrap(facets = vars(.id), ncol = 4)
+  facet_wrap(facets = vars(.id))
 
 
 
