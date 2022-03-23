@@ -28,6 +28,7 @@ library(distributional)
 library(lubridate)
 library(tsibble)
 library(as.charts)   # Custom library for formatting charts nicely
+library(parallel)
 
 # Conflicts
 conflict_prefer(name = "filter", winner = "dplyr")
@@ -417,6 +418,36 @@ forecast_mean_validation <- bind_rows(
   mutate(h = row_number()) |> 
   ungroup() |> 
   select(-l) 
+
+sim_for_model <- function(i, d, h, times, bootstrap, bc) {
+  if (bc) {
+    y <- generate(x = d[[i, "arima_bc"]][[1]], 
+                  h = h, 
+                  times = times, 
+                  bootstrap = bootstrap)
+  } else {
+    y <- generate(x = d[[i, "arima"]][[1]], 
+                  h = h, 
+                  times = times, 
+                  bootstrap = bootstrap)
+  }
+  y <- y |> 
+    mutate(w = d[[i, "w"]][[1]], 
+           .id = d[[i, ".id"]][[1]], 
+           l = d[[i, "l"]][[1]], 
+           bc = bc)
+  return(as_tibble(y))
+}
+
+z <- mclapply(X = 1:nrow(model_validation), 
+              FUN = sim_for_model, 
+              d = model_validation, 
+              h = 8L, 
+              times = 1000, 
+              bootstrap = FALSE, 
+              bc = FALSE, 
+              mc.cores = 8) |> 
+  bind_rows()
 
 forecast_uncertainty_validation <- model_validation |> 
   mutate(us = list(generate(x = arima, 
