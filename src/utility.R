@@ -4,12 +4,16 @@
 # *****************************************************************************
 # Font setup ----
 
-systemfonts::register_variant(
-  name = "Fira Sans Custom",
-  family = "Fira Sans",
-  weight = c("medium", "bold"),
-  features = systemfonts::font_feature(ligatures = c("standard",
-                                                     "contextual"))
+systemfonts::register_font(
+  name = "National 2 Custom", 
+  plain = systemfonts::system_fonts() |> filter(family == "National 2", style == "Regular") |> pull(path), 
+  bold = systemfonts::system_fonts() |> filter(family == "National 2", style == "Extrabold") |> pull(path), 
+  italic = systemfonts::system_fonts() |> filter(family == "National 2", style == "Regular Italic") |> pull(path), 
+  bolditalic = systemfonts::system_fonts() |> filter(family == "National 2", style == "Extrabold Italic") |> pull(path), 
+  features = systemfonts::font_feature(ligatures = c("discretionary", 
+                                                     "standard", 
+                                                     "contextual"), 
+                                       numbers = c("lining", "proportional"))
 )
 
 # *****************************************************************************
@@ -51,13 +55,10 @@ label_vjust = function(x) {
 # *****************************************************************************
 # Custom geom_text ----
 
-geom_text_custom <- function(family = "Fira Sans Custom",
-                             rel_size = 1,
-                             abs_size = 2,
+geom_text_custom <- function(family = "National 2 Custom",
                              fontface = "bold",
                              ...) {
   t <- shadowtext::geom_shadowtext(family = family,
-                                   size = rel_size * abs_size,
                                    fontface = fontface,
                                    bg.colour = "white", 
                                    bg.r = 0.08, 

@@ -13,7 +13,7 @@ series <- "unemployment"
 latest_data <- "2021Q4"
 forecast_periods <- 8
 forecast_uncertainty_reps <- 5000
-forecast_label_y <- 0.075
+forecast_label_y <- 0.055
 
 # Libraries
 library(conflicted)
@@ -66,30 +66,19 @@ dat <- read_csv(file = here(glue("data/{series}/{latest_data}/{series}.csv")),
 # *****************************************************************************
 # Forecast ----
 
-# Data for forecasting
-dat_model <- dat
+# Data for forecasting -- uses a 36 quarter window 
+dat_model <- dat |> tail(36)
 
 # Forecasting model
-model_lambda <- dat_model |>
-  features(.var = unemp, features = guerrero) |>
-  pull(lambda_guerrero) 
-
 model <- dat_model |> 
   model(
-    arima = ARIMA(formula = box_cox(x = unemp,
-                                    lambda = model_lambda),
-                  ic = "bic"), 
-    ets = ETS(formula = box_cox(x = unemp,
-                                lambda = model_lambda), 
-              ic = "bic")
-  ) |> 
-  mutate(blend = (arima + ets) / 2)
+    arima = ARIMA(formula = unemp, ic = "bic")
+  ) 
 
 # Mean forecast
 forecast_mean <- model |> 
   forecast(h = forecast_periods) |> 
   as_tibble() |>
-  filter(.model == "blend") |> 
   select(date, .mean)
 
 # Uncertainty simulations
@@ -98,7 +87,6 @@ forecast_uncertainty_sims <- model |>
            times = forecast_uncertainty_reps, 
            bootstrap = FALSE) |> 
   as_tibble() |> 
-  filter(.model == "blend") |> 
   select(-.model)
 
 # Forecast uncertainty intervals of growth rates as percentiles of 
@@ -183,7 +171,24 @@ vis_intervals <- bind_rows(
   arrange(date) |> 
   pivot_longer(cols = c("conf_lower", "conf_upper", "central_lower", "central_upper"), 
                names_to = "limit", 
-               values_to = "value")
+               values_to = "value") |> 
+  mutate(limit_type = case_when(
+    str_detect(string = limit, pattern = "conf_") ~ "conf", 
+    str_detect(string = limit, pattern = "central_") ~ "central", 
+    TRUE ~ NA_character_
+  ))
+
+# Date labels
+vis_dates <- tibble(
+  date = seq(from = min(vis_actuals$date), 
+             to = max(vis_forecast_mean$date), 
+             by = 1)
+) |> 
+  mutate(year = as.integer(year(date)), 
+         quarter = quarter(date)) |> 
+  mutate(label = ifelse(quarter == 1L, 
+                        glue("Q{quarter}\n{year}"), 
+                        glue("Q{quarter}"))) 
 
 # Create visualisation
 chart_forecasts <- ggplot() +
@@ -195,20 +200,30 @@ chart_forecasts <- ggplot() +
   # Actual / forecast line
   geom_vline(xintercept = as.Date(yearquarter(latest_data)), 
              size = linesize_af, 
-             colour = colour_af, 
-             alpha = alpha_af, 
+             colour = colour_forecasts, 
              linetype = linetype_af) + 
   
   # Forecast period label
   annotate(geom = "text", 
-           x = as.Date(yearquarter(latest_data)), 
+           x = as.Date(yearquarter(latest_data)) + dmonths(1), 
            y = forecast_label_y, 
-           hjust = -0.15, 
+           hjust = 0, 
            label = "Forecast", 
-           family = "Fira Sans Custom", 
+           family = "National 2 Custom", 
            fontface = "bold", 
            size = 2.5, 
-           colour = colour_af_label) + 
+           colour = colour_forecasts) + 
+  
+  # Actual period label
+  annotate(geom = "text", 
+           x = as.Date(yearquarter(latest_data)) - dmonths(1), 
+           y = forecast_label_y, 
+           hjust = 1, 
+           label = "Actual", 
+           family = "National 2 Custom", 
+           fontface = "bold", 
+           size = 2.5, 
+           colour = colour_actuals) + 
   
   # Uncertainty simulations
   geom_line(data = vis_uncertainty, 
@@ -216,23 +231,8 @@ chart_forecasts <- ggplot() +
                           y = .sim, 
                           group = .rep), 
             size = linesize_uncertainty, 
-            colour = colour_uncertainty, 
+            colour = colour_forecasts, 
             alpha = alpha_uncertainty) + 
-  
-  # Mean forecast points
-  geom_point(data = vis_forecast_mean, 
-             mapping = aes(x = date, 
-                           y = .mean), 
-             colour = colour_forecast_mean, 
-             size = point_size) + 
-  
-  # 90% uncertainty interval points
-  geom_point(data = vis_intervals |> 
-               filter(limit %in% c("conf_lower", "conf_upper")), 
-             mapping = aes(x = date, 
-                           y = value), 
-             colour = colour_forecast_intervals, 
-             size = point_size) + 
   
   # Actuals line
   geom_line(data = vis_actuals, 
@@ -248,81 +248,88 @@ chart_forecasts <- ggplot() +
                                  label = comma(x = 100 * unemp, 
                                                accuracy = 0.1), 
                                  vjust = vjust), 
+                   size = label_size, 
                    colour = colour_actuals) + 
   
-  # 90% uncertainty interval lines
-  geom_line(data = vis_intervals |> 
-              filter(limit %in% c("conf_lower", "conf_upper")), 
+  # Uncertainty interval lines
+  geom_line(data = vis_intervals, 
             mapping = aes(x = date, 
                           y = value, 
+                          colour = limit_type, 
                           group = limit), 
-            colour = colour_forecast_intervals, 
             size = linesize_forecast_intervals, 
             linetype = linetype_forecast_intervals) + 
   
-  # Central (50%) uncertainty lines
-  geom_line(data = vis_intervals |> 
-              filter(limit %in% c("central_lower", "central_upper")), 
-            mapping = aes(x = date, 
-                          y = value, 
-                          group = limit), 
-            colour = colour_forecast_central, 
-            size = linesize_forecast_central, 
-            linetype = linetype_forecast_central) + 
+  # Uncertainty interval points
+  geom_point(data = vis_intervals, 
+             mapping = aes(x = date, 
+                           y = value, 
+                           fill = limit_type), 
+             colour = halo_colour, 
+             shape = 21, 
+             size = point_size, 
+             stroke = point_stroke) + 
   
-  # 90% uncertainty interval labels
+  # Uncertainty interval labels
   geom_text_custom(data = vis_intervals |> 
-                     filter(type == "forecast", limit == "conf_upper"), 
+                     filter(type == "forecast", 
+                            limit %in% c("central_upper", 
+                                         "conf_upper")), 
                    mapping = aes(x = date, 
                                  y = value, 
+                                 colour = limit_type, 
+                                 size = limit_type, 
                                  label = comma(x = 100 * value, 
                                                accuracy = 0.1), 
                                  vjust = vjust_up), 
-                   colour = colour_forecast_intervals) + 
+                   show.legend = FALSE) + 
   geom_text_custom(data = vis_intervals |> 
-                     filter(type == "forecast", limit == "conf_lower"), 
+                     filter(type == "forecast", 
+                            limit %in% c("central_lower", 
+                                         "conf_lower")), 
                    mapping = aes(x = date, 
                                  y = value, 
+                                 colour = limit_type, 
+                                 size = limit_type, 
                                  label = comma(x = 100 * value, 
                                                accuracy = 0.1), 
                                  vjust = vjust_down), 
-                   colour = colour_forecast_intervals) + 
-  
-  # Mean forecast line
-  geom_line(data = vis_forecast_mean, 
-            mapping = aes(x = date, 
-                          y = .mean), 
-            colour = colour_forecast_mean, 
-            size = linesize_forecast_mean) + 
-  
-  # Mean forecast labels
-  geom_text_custom(data = vis_forecast_mean |> filter(type == "forecast"), 
-                   mapping = aes(x = date, 
-                                 y = .mean, 
-                                 label = comma(x = 100 * .mean, 
-                                               accuracy = 0.1), 
-                                 vjust = vjust), 
-                   colour = colour_forecast_mean) + 
+                   show.legend = FALSE) + 
   
   # Actual points
   geom_point(data = vis_actuals, 
              mapping = aes(x = date, 
                            y = unemp), 
-             colour = colour_actuals, 
-             size = point_size) + 
+             fill = colour_actuals, 
+             colour = halo_colour, 
+             shape = 21, 
+             size = point_size,
+             stroke = point_stroke) + 
   
   # Scales
   scale_y_continuous(labels = percent_format(accuracy = 1),
-                     limits = c(0, 0.08),
+                     limits = c(0, 0.06),
                      breaks = seq(0, 0.08, 0.01)) +
-  scale_x_yearquarter(date_breaks = "1 year")
+  scale_x_yearquarter(breaks = vis_dates$date, 
+                      labels = vis_dates$label, 
+                      expand = expansion(0.05, 0)) + 
+  scale_colour_manual(values = c("central" = colour_intervals, 
+                                 "conf" = colour_intervals_alt), 
+                      labels = c("50% of forecasts are in this range", 
+                                 "90% of forecasts are in this range"), 
+                      name = NULL, 
+                      aesthetics = c("colour", "fill")) + 
+  scale_size_manual(values = c("central" = label_size, 
+                               "conf" = label_size_small), 
+                    guide = "none")
 
 output_chart(chart = chart_forecasts, 
              filename = series, 
              path = here(glue("forecasts/{series}/{latest_data}")), 
              orientation = "wide", 
              xlab = "", 
-             ylab = "")
+             ylab = "", 
+             legend_position = "top")
 
 # *****************************************************************************
 
@@ -404,13 +411,13 @@ forecast_mean_validation <- bind_rows(
     unnest(cols = fc_arima_bc) |> 
     ungroup() |> 
     mutate(.mean = inv_box_cox(x = .mean, lambda = l)) |> 
-    mutate(bc = "yes"), 
+    mutate(bc = TRUE), 
   model_validation |>
     mutate(fc_arima = list(forecast(object = arima, h = 8L))) |> 
     select(w, .id, l, fc_arima) |> 
     unnest(cols = fc_arima) |> 
     ungroup() |> 
-    mutate(bc = "no")
+    mutate(bc = FALSE)
 ) |> 
   select(bc, w, .id, date, .mean, l) |> 
   arrange(bc, w, .id, date) |> 
@@ -439,41 +446,18 @@ sim_for_model <- function(i, d, h, times, bootstrap, bc) {
   return(as_tibble(y))
 }
 
-z <- mclapply(X = 1:nrow(model_validation), 
-              FUN = sim_for_model, 
-              d = model_validation, 
-              h = 8L, 
-              times = 1000, 
-              bootstrap = FALSE, 
-              bc = FALSE, 
-              mc.cores = 8) |> 
-  bind_rows()
+forecast_uncertainty_validation <- mclapply(X = 1:nrow(model_validation), 
+                                            FUN = sim_for_model, 
+                                            d = model_validation, 
+                                            h = 8L, 
+                                            times = 1000, 
+                                            bootstrap = FALSE, 
+                                            bc = FALSE, 
+                                            mc.cores = 8) |> 
+  bind_rows() |> 
+  mutate(.sim = ifelse(bc, inv_box_cox(x = .sim, lambda = l), .sim))
 
-forecast_uncertainty_validation <- model_validation |> 
-  mutate(us = list(generate(x = arima, 
-                            h = 8L, 
-                            times = 1000, 
-                            bootstrap = FALSE)), 
-         us_bc = list(generate(x = arima_bc, 
-                               h = 8L, 
-                               times = 1000, 
-                               bootstrap = FALSE))) 
-
-forecast_uncertainty_validation_ci <- bind_rows(
-  forecast_uncertainty_validation |> 
-    mutate(us_bc = list(as_tibble(us_bc))) |> 
-    select(w, .id, l, us_bc) |> 
-    unnest(cols = us_bc) |> 
-    ungroup() |> 
-    mutate(.sim = inv_box_cox(x = .sim, lambda = l)) |> 
-    mutate(bc = "yes"), 
-  forecast_uncertainty_validation |> 
-    mutate(us = list(as_tibble(us))) |> 
-    select(w, .id, l, us) |> 
-    unnest(cols = us) |> 
-    ungroup() |> 
-    mutate(bc = "no")
-) |> 
+forecast_uncertainty_validation_ci <- forecast_uncertainty_validation |> 
   group_by(bc, w, .id, date) |> 
   summarise(conf_lower = quantile(.sim, probs = 0.05), 
             conf_upper = quantile(.sim, probs = 0.95), 
